@@ -10,3 +10,4 @@
 | 6 | alpha=1.0 flickers, alpha=0.2 steady | PASS |
 | 7 | Both servos center and sweep, no resets, assembled orthogonal | PASS |
 | 8 | Axes independent, diagonal works, returns to center | PASS |
+| 9 | Self tests PASS, n climbs to 128, std small still, large when shaken | PASS |
