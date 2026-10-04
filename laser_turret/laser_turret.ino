@@ -3,6 +3,7 @@
  * Double-axis turret controlled by tilting an MPU-6050.
  */
 #include <Wire.h>
+#include <Servo.h>
 const uint8_t MPU_ADDR = 0x68;          // I2C address (AD0 left unconnected)
 
 const uint8_t REG_PWR_MGMT_1   = 0x6B;  // power management, chip starts asleep
@@ -15,6 +16,13 @@ const uint16_t SAMPLE_PERIOD_MS = 10;   // read sensor at ~100 Hz
 const uint16_t PRINT_PERIOD_MS  = 100;  // print at ~10 Hz
 
 const float SMOOTHING = 0.2f;   // 0..1, lower = smoother but laggier
+
+const uint8_t PAN_PIN  = 9;    // servo that follows roll  (left/right)
+const uint8_t TILT_PIN = 10;   // servo that follows pitch (up/down)
+
+// If a servo moves the wrong way, flip its flag to true.
+const bool INVERT_PAN  = false;
+const bool INVERT_TILT = false;
 
 struct AccelData {
   int16_t x;
@@ -34,6 +42,11 @@ float latestPitch = 0.0f;
 
 float filteredRoll  = 0.0f;
 float filteredPitch = 0.0f;
+
+Servo panServo;
+Servo tiltServo;
+int panCmd  = 90;
+int tiltCmd = 90;
 
 // Try every 7-bit address and print the ones that answer.
 // void scanI2C() {
@@ -93,6 +106,14 @@ float clampAngle(float a) {
   return a;
 }
 
+// Convert a tilt angle (-90..+90 degrees) to a servo command (0..180).
+int angleToServo(float angleDeg, bool invert) {
+  if (angleDeg > 90.0f)  angleDeg = 90.0f;
+  if (angleDeg < -90.0f) angleDeg = -90.0f;
+  if (invert) angleDeg = -angleDeg;
+  return (int)(90.0f + angleDeg + 0.5f);   // +0.5 rounds to nearest
+}
+
 void setup() {
   Serial.begin(115200);
   Serial.println(F("Turret firmware booting..."));
@@ -110,8 +131,14 @@ void setup() {
   mpuWrite(REG_ACCEL_CONFIG, 0x00);   // +/-2 g full scale range
 
   int id = mpuWhoAmI();
+
   Serial.print(F("WHO_AM_I = 0x"));
   Serial.println(id, HEX);
+  panServo.attach(PAN_PIN);
+  tiltServo.attach(TILT_PIN);
+  panServo.write(90);    // start centered
+  tiltServo.write(90);
+  Serial.println(F("Turret ready. Tilt the MPU-6050."));
 }
 
 void loop() {
@@ -135,6 +162,11 @@ void loop() {
 
       latestRoll  = filteredRoll;
       latestPitch = filteredPitch;
+
+      panCmd  = angleToServo(filteredRoll,  INVERT_PAN);
+      tiltCmd = angleToServo(filteredPitch, INVERT_TILT);
+      panServo.write(panCmd);
+      tiltServo.write(tiltCmd);
     }
   }
 
@@ -145,5 +177,7 @@ void loop() {
     Serial.print(F(" az=")); Serial.print(latest.z);
     Serial.print(F(" | roll=")); Serial.print(latestRoll, 1);
     Serial.print(F(" pitch=")); Serial.println(latestPitch, 1);
+    Serial.print(F(" | pan=")); Serial.print(panCmd);
+    Serial.print(F(" tilt=")); Serial.println(tiltCmd);
   }
 }

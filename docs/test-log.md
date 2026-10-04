@@ -8,3 +8,5 @@
 | 4 | Flat: az~16384, ax/ay~0, each edge up gives ~16384, magnitude ~16384 | PASS |
 | 5 | Flat ~0/0, 45 deg and 90 deg checks for roll and pitch | PASS |
 | 6 | alpha=1.0 flickers, alpha=0.2 steady | PASS |
+| 7 | Both servos center and sweep, no resets, assembled orthogonal | PASS |
+| 8 | Axes independent, diagonal works, returns to center | PASS |
