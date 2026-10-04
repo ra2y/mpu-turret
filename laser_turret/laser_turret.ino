@@ -24,10 +24,63 @@ const uint8_t TILT_PIN = 10;   // servo that follows pitch (up/down)
 const bool INVERT_PAN  = false;
 const bool INVERT_TILT = false;
 
+const uint8_t WINDOW_SIZE = 128;   // rolling window length required by the trial
+
 struct AccelData {
   int16_t x;
   int16_t y;
   int16_t z;
+};
+
+/*
+ * RollingStats: keeps the most recent WINDOW_SIZE samples in a fixed size
+ * circular buffer and computes mean / standard deviation on demand.
+ * The buffer is a plain array inside the object
+ */
+class RollingStats {
+ public:
+  RollingStats() : head_(0), count_(0) {
+    for (uint8_t i = 0; i < WINDOW_SIZE; i++) {
+      samples_[i] = 0;
+    }
+  }
+
+  // Add one sample, once full, the oldest sample is overwritten.
+  void add(int16_t value) {
+    samples_[head_] = value;
+    head_ = (head_ + 1) % WINDOW_SIZE;
+    if (count_ < WINDOW_SIZE) {
+      count_++;
+    }
+  }
+
+  uint8_t size() const { return count_; }
+
+  float mean() const {
+    if (count_ == 0) return 0.0f;
+    int32_t sum = 0;   // 128 * 32768 fits in 32 bits
+    for (uint8_t i = 0; i < count_; i++) {
+      sum += samples_[i];
+    }
+    return (float)sum / (float)count_;
+  }
+
+  // Population standard deviation: sqrt( sum((x - mean)^2) / N )
+  float stdDev() const {
+    if (count_ < 2) return 0.0f;
+    float m = mean();
+    float acc = 0.0f;
+    for (uint8_t i = 0; i < count_; i++) {
+      float d = (float)samples_[i] - m;
+      acc += d * d;
+    }
+    return sqrt(acc / (float)count_);
+  }
+
+ private:
+  int16_t samples_[WINDOW_SIZE];
+  uint8_t head_;    // index where the next sample will be written
+  uint8_t count_;   // how many valid samples we hold (max WINDOW_SIZE)
 };
 
 AccelData latest = {0, 0, 0};
@@ -47,6 +100,8 @@ Servo panServo;
 Servo tiltServo;
 int panCmd  = 90;
 int tiltCmd = 90;
+
+RollingStats axStats;   // rolling stats of the RAW X axis reading
 
 // Try every 7-bit address and print the ones that answer.
 // void scanI2C() {
@@ -114,8 +169,58 @@ int angleToServo(float angleDeg, bool invert) {
   return (int)(90.0f + angleDeg + 0.5f);   // +0.5 rounds to nearest
 }
 
+#define RUN_SELF_TESTS 1   // set to 0 to skip the self test at boot
+
+#if RUN_SELF_TESTS
+bool nearlyEqual(float a, float b, float tol) {
+  return fabs(a - b) <= tol;
+}
+
+void report(const __FlashStringHelper* name, bool pass) {
+  Serial.print(F("SELFTEST "));
+  Serial.print(name);
+  Serial.println(pass ? F(": PASS") : F(": FAIL"));
+}
+
+void runSelfTests() {
+  {  // full window of 1..128
+    RollingStats s;
+    for (int16_t i = 1; i <= WINDOW_SIZE; i++) s.add(i);
+    report(F("full window"),
+           s.size() == WINDOW_SIZE &&
+           nearlyEqual(s.mean(), 64.5f, 0.01f) &&
+           nearlyEqual(s.stdDev(), 36.95f, 0.05f));
+
+    s.add(129);   // oldest (1) drops out; window is now 2..129
+    report(F("rolling slide"),
+           s.size() == WINDOW_SIZE &&
+           nearlyEqual(s.mean(), 65.5f, 0.01f) &&
+           nearlyEqual(s.stdDev(), 36.95f, 0.05f));
+  }
+  {  // constant input has zero spread
+    RollingStats c;
+    for (uint8_t i = 0; i < WINDOW_SIZE; i++) c.add(500);
+    report(F("constant input"),
+           nearlyEqual(c.mean(), 500.0f, 0.01f) &&
+           nearlyEqual(c.stdDev(), 0.0f, 0.01f));
+  }
+  {  // partially filled window: {10, 20} -> mean 15, std 5
+    RollingStats p;
+    p.add(10);
+    p.add(20);
+    report(F("partial window"),
+           p.size() == 2 &&
+           nearlyEqual(p.mean(), 15.0f, 0.01f) &&
+           nearlyEqual(p.stdDev(), 5.0f, 0.01f));
+  }
+}
+#endif
+
 void setup() {
   Serial.begin(115200);
+  #if RUN_SELF_TESTS
+  runSelfTests();
+  #endif
   Serial.println(F("Turret firmware booting..."));
 
   Wire.begin();
@@ -149,6 +254,7 @@ void loop() {
     AccelData a;
     if (readAccel(a)) {
       latest = a;
+      axStats.add(a.x);   // rolling window of RAW x readings
 
       float fx = (float)a.x;
       float fy = (float)a.y;
@@ -179,5 +285,8 @@ void loop() {
     Serial.print(F(" pitch=")); Serial.println(latestPitch, 1);
     Serial.print(F(" | pan=")); Serial.print(panCmd);
     Serial.print(F(" tilt=")); Serial.println(tiltCmd);
+    Serial.print(F(" | ax[n=")); Serial.print(axStats.size());
+    Serial.print(F("] mean=")); Serial.print(axStats.mean(), 1);
+    Serial.print(F(" std=")); Serial.println(axStats.stdDev(), 1);
   }
 }
