@@ -27,6 +27,9 @@ unsigned long lastPrintMs  = 0;
 unsigned long lastBeatMs = 0;
 bool ledOn = false;
 
+float latestRoll  = 0.0f;   // degrees, -90..90
+float latestPitch = 0.0f;
+
 // Try every 7-bit address and print the ones that answer.
 // void scanI2C() {
 //   Serial.println(F("Scanning I2C bus..."));
@@ -79,6 +82,12 @@ bool readAccel(AccelData &out) {
   return true;
 }
 
+float clampAngle(float a) {
+  if (a > 90.0f)  return 90.0f;
+  if (a < -90.0f) return -90.0f;
+  return a;
+}
+
 void setup() {
   Serial.begin(115200);
   Serial.println(F("Turret firmware booting..."));
@@ -103,20 +112,27 @@ void setup() {
 void loop() {
   unsigned long now = millis();
 
-  // Sample at a fixed rate
   if (now - lastSampleMs >= SAMPLE_PERIOD_MS) {
     lastSampleMs = now;
     AccelData a;
     if (readAccel(a)) {
       latest = a;
+
+      float fx = (float)a.x;
+      float fy = (float)a.y;
+      float fz = (float)a.z;
+
+      latestRoll  = clampAngle(atan2(fy, fz) * RAD_TO_DEG);
+      latestPitch = clampAngle(atan2(-fx, sqrt(fy * fy + fz * fz)) * RAD_TO_DEG);
     }
   }
 
-  // Print at a slower rate
   if (now - lastPrintMs >= PRINT_PERIOD_MS) {
     lastPrintMs = now;
     Serial.print(F("ax=")); Serial.print(latest.x);
     Serial.print(F(" ay=")); Serial.print(latest.y);
-    Serial.print(F(" az=")); Serial.println(latest.z);
+    Serial.print(F(" az=")); Serial.print(latest.z);
+    Serial.print(F(" | roll=")); Serial.print(latestRoll, 1);
+    Serial.print(F(" pitch=")); Serial.println(latestPitch, 1);
   }
 }
