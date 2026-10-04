@@ -14,6 +14,8 @@ const uint8_t REG_ACCEL_XOUT_H = 0x3B;  // first of 6 accel bytes (XH XL YH YL Z
 const uint16_t SAMPLE_PERIOD_MS = 10;   // read sensor at ~100 Hz
 const uint16_t PRINT_PERIOD_MS  = 100;  // print at ~10 Hz
 
+const float SMOOTHING = 0.2f;   // 0..1, lower = smoother but laggier
+
 struct AccelData {
   int16_t x;
   int16_t y;
@@ -29,6 +31,9 @@ bool ledOn = false;
 
 float latestRoll  = 0.0f;   // degrees, -90..90
 float latestPitch = 0.0f;
+
+float filteredRoll  = 0.0f;
+float filteredPitch = 0.0f;
 
 // Try every 7-bit address and print the ones that answer.
 // void scanI2C() {
@@ -122,8 +127,14 @@ void loop() {
       float fy = (float)a.y;
       float fz = (float)a.z;
 
-      latestRoll  = clampAngle(atan2(fy, fz) * RAD_TO_DEG);
-      latestPitch = clampAngle(atan2(-fx, sqrt(fy * fy + fz * fz)) * RAD_TO_DEG);
+      float roll  = clampAngle(atan2(fy, fz) * RAD_TO_DEG);
+      float pitch = clampAngle(atan2(-fx, sqrt(fy * fy + fz * fz)) * RAD_TO_DEG);
+
+      filteredRoll  = SMOOTHING * roll  + (1.0f - SMOOTHING) * filteredRoll;
+      filteredPitch = SMOOTHING * pitch + (1.0f - SMOOTHING) * filteredPitch;
+
+      latestRoll  = filteredRoll;
+      latestPitch = filteredPitch;
     }
   }
 
